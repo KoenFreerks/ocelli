@@ -1,0 +1,9 @@
+# Install into a venv made from the system Python so GStreamer's python3-gi is visible:
+#   /usr/bin/python3 -m venv --system-site-packages .venv
+#   .venv/bin/pip install -r requirements.txt
+# Versions below are the ones tested (Oct 2026).
+bleak>=3.0.2,<4
+dbus-fast>=5.2.0
+qasync>=0.28.0
+PySide6>=6.12.0
+pytest>=9.1
