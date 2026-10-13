@@ -161,6 +161,21 @@ class CameraController(QObject):
         if target in ("camera", "both") and self.cam_cfg.ble_address:
             self._set_camera_recording(on)
 
+    def configured(self) -> bool:
+        """Has a video feed or a Bluetooth camera assigned (B is empty in one-camera setups)."""
+        return bool(self.capture or self.cam_cfg.ble_address)
+
+    def can_record(self) -> bool:
+        """Whether REC would do something right now (stopping is always possible)."""
+        if self.recording_any():
+            return True
+        target = self.cfg.record.target
+        cam = target in ("camera", "both") and self.connected()
+        cap = self.capture
+        stream = (target in ("stream", "both") and cap is not None and cap.supports_recording
+                  and cap.state == "streaming")
+        return cam or stream
+
     def recording_any(self) -> bool:
         cam = self.cfg.record.target in ("camera", "both") and self.status.recording
         return cam or self.status.stream_rec

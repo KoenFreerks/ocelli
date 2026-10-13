@@ -272,7 +272,14 @@ class MainWindow(QWidget):
 
     def _refresh_bar(self) -> None:
         any_rec = any(c.recording_any() for c in self.ctls.values())
-        self.rec_both.setText("■ STOP both" if any_rec else "● REC both")
+        many = sum(c.configured() for c in self.ctls.values()) > 1
+        key = (any_rec, many)
+        if key == getattr(self, "_bar_key", None):
+            return  # runs for every timecode tick; only touch the button when it changes
+        self._bar_key = key
+        self.rec_both.setText((("■ STOP " if any_rec else "● REC ") + ("both" if many else "")).strip())
+        self.rec_both.setToolTip("Start/stop recording on the cameras (Ctrl+R); Ctrl+1 / Ctrl+2 "
+                                 "record one camera. What gets recorded: Settings → Recording")
         self.rec_both.setProperty("recording", "true" if any_rec else "false")
         self.rec_both.style().unpolish(self.rec_both)
         self.rec_both.style().polish(self.rec_both)
@@ -305,9 +312,17 @@ class MainWindow(QWidget):
             self.swap()
 
     def toggle_record_both(self) -> None:
-        start = not any(c.recording_any() for c in self.ctls.values())
-        for ctl in self.ctls.values():
-            ctl.set_recording(start)  # both sent concurrently
+        """Stop whatever is recording; if nothing is, start every camera that can."""
+        recording = [c for c in self.ctls.values() if c.recording_any()]
+        for ctl in recording or [c for c in self.ctls.values() if c.configured()]:
+            ctl.set_recording(not recording)  # sent concurrently
+
+    def toggle_record_camera(self, cid: str) -> None:
+        ctl = self.ctls[cid]
+        if ctl.configured():
+            ctl.toggle_recording()
+        else:
+            self.stage.show_alert("warn", f"Camera {cid} is not set up (Settings)")
 
     def sync_time_both(self) -> None:
         for ctl in self.ctls.values():
@@ -424,6 +439,8 @@ class MainWindow(QWidget):
         self.cfg.cameras = new.cameras
         self.cfg.ble = new.ble
         self.cfg.record = new.record
+        for ctl in self.ctls.values():
+            ctl.changed.emit()  # buttons and tooltips follow the new REC target
         try:
             config.save(self.cfg)
         except OSError as e:
@@ -455,6 +472,8 @@ class MainWindow(QWidget):
             "H": self.toggle_bar,
             "W": lambda: self.set_feed_windows(not self.feed_windows),
             "Ctrl+R": self.toggle_record_both,
+            "Ctrl+1": lambda: self.toggle_record_camera("A"),
+            "Ctrl+2": lambda: self.toggle_record_camera("B"),
             "Ctrl+T": self.sync_time_both,
             "Ctrl+,": self.open_settings,
         }
@@ -535,6 +554,7 @@ C           camera control panels (or hover + ⚙)
 D           debug overlay (capture size, fps, latency)
 H           hide/show this bar
 Ctrl+R      record both on/off
+Ctrl+1 / 2  record camera A / B on/off (or the Rec button in its status bar)
 Ctrl+T      sync both camera clocks to this PC
 Ctrl+,      settings
 ?, F1       this help"""

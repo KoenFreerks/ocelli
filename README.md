@@ -87,7 +87,8 @@ Press **C** for the control panels (record, ISO, shutter, white balance, lens, t
 | C, or hover + ⚙ | camera control panel (record, ISO, shutter, white balance, lens) |
 | D | debug overlay: actual capture size, fps, capture-to-app delay |
 | H | hide/show the top bar |
-| Ctrl+R | record both on/off |
+| Ctrl+R | record both cameras on/off (stops whichever is recording) |
+| Ctrl+1 / Ctrl+2 | record camera A / B on/off (also the **Rec** button in each camera's status bar) |
 | Ctrl+T | sync both camera clocks to this PC |
 | Ctrl+, | settings: scan/pair cameras, assign BLE and Cam Links to A/B, options |
 
@@ -103,7 +104,11 @@ this affects recordings (see below).
 
 ## Recording
 
-Settings → **Recording → REC records** picks what the REC buttons (and Ctrl+R) do:
+Each camera records on its own: use the **Rec** button in its status bar (it works in every layout
+and in separate windows), **Ctrl+1** / **Ctrl+2**, or the Record button in its control panel.
+**REC both** (top bar, Ctrl+R) stops whatever is recording, or starts every camera that can.
+
+Settings → **Recording → REC records** picks what these buttons do:
 
 - **The camera's own media** (default): sends the record command over Bluetooth. The footage is
   the camera's full-quality file on its card or SSD.

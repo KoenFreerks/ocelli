@@ -42,6 +42,12 @@ QFrame#panel QPushButton:disabled { color: #666; }
 QFrame#panel QPushButton#rec { font-weight: bold; }
 QFrame#panel QPushButton#rec[recording="true"] { background: #b3121b; border-color: #e33; }
 QFrame#panel QComboBox, QFrame#panel QSpinBox { background: #222; border: 1px solid #444; }
+QFrame#statusbar QToolButton#recbtn { color: #e6e6e6; background: rgba(60,60,60,200);
+    border: 1px solid #555; font: bold 11px 'Sans'; padding: 0 8px; }
+QFrame#statusbar QToolButton#recbtn:hover { background: rgba(90,90,90,220); }
+QFrame#statusbar QToolButton#recbtn:disabled { color: #777; background: rgba(40,40,40,160); }
+QFrame#statusbar QToolButton#recbtn[recording="true"] { background: #b3121b; border-color: #e33;
+    color: white; }
 QToolButton#gear { color: white; background: rgba(0,0,0,140); border: none; font-size: 16px;
     padding: 2px 6px; }
 """
@@ -62,6 +68,11 @@ class StatusBar(QFrame):
         lay.setContentsMargins(4, 2, 4, 2)
         lay.setSpacing(2)
         self.name = QLabel(ctl.name)
+        self._rec_key: tuple | None = None
+        self.recbtn = QToolButton()
+        self.recbtn.setObjectName("recbtn")
+        self.recbtn.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Tab must keep swapping cameras
+        self.recbtn.clicked.connect(ctl.toggle_recording)
         self.rec = QLabel()
         self.srec = QLabel()  # recording the HDMI feed to this PC
         self.tc = QLabel()
@@ -69,7 +80,7 @@ class StatusBar(QFrame):
         self.media = QLabel()
         self.battery = QLabel()
         self.links = QLabel()
-        for w in (self.name, self.rec, self.srec, self.tc, self.settings):
+        for w in (self.name, self.recbtn, self.rec, self.srec, self.tc, self.settings):
             lay.addWidget(w)
         lay.addStretch(1)
         for w in (self.media, self.battery, self.links):
@@ -85,8 +96,30 @@ class StatusBar(QFrame):
         self.settings.setVisible(not compact)
         self.media.setVisible(not compact)
 
+    def _update_rec_button(self, st) -> None:
+        # refresh() runs for every timecode tick, so only touch the widget when something changed
+        ctl = self.ctl
+        on = ctl.recording_any()
+        key = (ctl.configured(), on, not st.rec_pending and ctl.can_record(), ctl.cfg.record.target)
+        if key == self._rec_key:
+            return
+        self._rec_key = key
+        configured, _on, enabled, target = key
+        b = self.recbtn
+        b.setVisible(configured)
+        b.setText("■ Stop" if on else "● Rec")
+        b.setEnabled(enabled)
+        b.setProperty("recording", "true" if on else "false")
+        b.style().unpolish(b)
+        b.style().polish(b)
+        where = {"camera": "on the camera", "stream": "the stream to this PC",
+                 "both": "the camera and the stream"}[target]
+        b.setToolTip(f"{'Stop' if on else 'Start'} recording {where} "
+                     f"(Ctrl+{'1' if ctl.cid == 'A' else '2'})")
+
     def refresh(self) -> None:
         st = self.ctl.status
+        self._update_rec_button(st)
         if st.rec_pending:
             self.rec.setText(f"{_dot('#f5b400')} {'REC…' if st.rec_pending == 'start' else 'STOP…'}")
         elif st.recording:
@@ -265,7 +298,7 @@ class ControlPanel(QFrame):
         st, ctl = self.ctl.status, self.ctl
         live = ctl.connected()
         target = ctl.cfg.record.target
-        self.rec.setEnabled(live if target == "camera" else ctl.capture is not None)
+        self.rec.setEnabled(not st.rec_pending and ctl.can_record())
         for w in (self.iso, self.shutter, self.kelvin, self.tint, self.auto_wb, self.sync):
             w.setEnabled(live)
         lens = live and bool(st.has_lens)
