@@ -11,7 +11,9 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
+    QComboBox,
     QDialogButtonBox,
+    QFileDialog,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -31,6 +34,12 @@ from ble.client import CameraLink, bluez_device_props, scan
 from video import devices
 
 log = logging.getLogger(__name__)
+
+RECORD_TARGETS = {
+    "camera": "The camera's own media (over Bluetooth)",
+    "stream": "The video stream, saved on this PC (no Bluetooth needed)",
+    "both": "Both",
+}
 
 
 class SettingsDialog(QDialog):
@@ -91,6 +100,42 @@ class SettingsDialog(QDialog):
         row.addWidget(refresh)
         row.addStretch(1)
         vl.addLayout(row)
+        lay.addWidget(box)
+
+        # Recording
+        box = QGroupBox("Recording")
+        form = QFormLayout(box)
+        self.rec_target = QComboBox()
+        for key, text in RECORD_TARGETS.items():
+            self.rec_target.addItem(text, key)
+        self.rec_target.setCurrentIndex(max(0, self.rec_target.findData(cfg.record.target)))
+        self.rec_target.setToolTip("What the REC buttons do. Recording the stream saves what the "
+                                   "HDMI output shows, including overlays such as focus peaking.")
+        form.addRow("REC records", self.rec_target)
+        row = QHBoxLayout()
+        self.rec_folder = QLineEdit(cfg.record.folder)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_folder)
+        row.addWidget(self.rec_folder, 1)
+        row.addWidget(browse)
+        form.addRow("Save stream recordings in", row)
+        self.rec_codec = QComboBox()
+        self.rec_codec.addItem("H.264", "h264")
+        self.rec_codec.addItem("H.265 (HEVC)", "h265")
+        self.rec_codec.setCurrentIndex(max(0, self.rec_codec.findData(cfg.record.codec)))
+        self.rec_codec.currentIndexChanged.connect(self._show_encoder)
+        form.addRow("Codec", self.rec_codec)
+        self.rec_encoder = QLabel()
+        form.addRow("Encoder", self.rec_encoder)
+        self.rec_bitrate = QSpinBox(minimum=2, maximum=400, suffix=" Mbit/s")
+        self.rec_bitrate.setValue(cfg.record.bitrate_mbps)
+        form.addRow("Bitrate", self.rec_bitrate)
+        self.rec_container = QComboBox()
+        self.rec_container.addItem("MKV (safest if the PC crashes)", "mkv")
+        self.rec_container.addItem("MP4 (fragmented)", "mp4")
+        self.rec_container.setCurrentIndex(max(0, self.rec_container.findData(cfg.record.container)))
+        form.addRow("File type", self.rec_container)
+        self._show_encoder()
         lay.addWidget(box)
 
         # Options
@@ -260,11 +305,37 @@ class SettingsDialog(QDialog):
         self._fill_video()
         self.vid_table.selectRow(row)
 
+    # --- Recording ----------------------------------------------------------------------
+
+    def _browse_folder(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Folder for stream recordings",
+                                             self.rec_folder.text())
+        if d:
+            self.rec_folder.setText(d)
+
+    def _show_encoder(self) -> None:
+        from video import recorder
+
+        codec = self.rec_codec.currentData()
+        found = recorder.pick_encoder(codec)
+        if found is None:
+            self.rec_encoder.setText("none installed: stream recording unavailable")
+        elif found[0].startswith("nv"):
+            self.rec_encoder.setText(f"{found[1]} (graphics card, low CPU load)")
+        else:
+            self.rec_encoder.setText(f"{found[1]}: uses a lot of CPU at 1080p60")
+
     # --- Save ---------------------------------------------------------------------------
 
     def _save(self) -> None:
         self.cfg.ble.auto_sync_time = self.auto_sync.isChecked()
         self.cfg.ble.stagger_seconds = self.stagger.value()
         self.cfg.ble.host_name = self.host_name.text().strip() or "Ocelli"
+        rc = self.cfg.record
+        rc.target = self.rec_target.currentData()
+        rc.folder = self.rec_folder.text().strip() or config.RecordConfig().folder
+        rc.codec = self.rec_codec.currentData()
+        rc.bitrate_mbps = self.rec_bitrate.value()
+        rc.container = self.rec_container.currentData()
         self.saved.emit(self.cfg)
         self.accept()

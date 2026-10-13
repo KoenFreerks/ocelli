@@ -51,6 +51,17 @@ class BleConfig:
 
 
 @dataclass
+class RecordConfig:
+    # What REC does: "camera" = camera's own media over Bluetooth, "stream" = encode the
+    # HDMI feed to a file on this PC, "both".
+    target: str = "camera"
+    folder: str = str(Path.home() / "Videos" / "Ocelli")
+    codec: str = "h264"  # "h264" or "h265"; NVIDIA NVENC is used when available, else x264/x265
+    bitrate_mbps: int = 40
+    container: str = "mkv"  # "mkv" or "mp4" (fragmented, survives a crash)
+
+
+@dataclass
 class UiConfig:
     layout: str = "pip"  # "pip" (main + thumbnail), "side", "single"
     main_camera: str = "A"
@@ -65,6 +76,7 @@ class AppConfig:
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     ble: BleConfig = field(default_factory=BleConfig)
     ui: UiConfig = field(default_factory=UiConfig)
+    record: RecordConfig = field(default_factory=RecordConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> AppConfig:
@@ -78,6 +90,8 @@ class AppConfig:
             cfg.ble = BleConfig(**data["ble"])
         if "ui" in data:
             cfg.ui = UiConfig(**data["ui"])
+        if "record" in data:
+            cfg.record = RecordConfig(**data["record"])
         return cfg
 
     def camera_for_address(self, address: str) -> str | None:

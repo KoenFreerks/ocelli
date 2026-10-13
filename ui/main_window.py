@@ -243,7 +243,7 @@ class MainWindow(QWidget):
         lay.addSpacing(16)
         self.rec_both = QPushButton("● REC both")
         self.rec_both.setObjectName("recboth")
-        self.rec_both.setToolTip("Start/stop recording on both cameras (Ctrl+R)")
+        self.rec_both.setToolTip("Start/stop recording on both cameras (Ctrl+R). Where it records: Settings → Recording")
         self.rec_both.clicked.connect(self.toggle_record_both)
         lay.addWidget(self.rec_both)
         sync = QPushButton("Sync time")
@@ -271,7 +271,7 @@ class MainWindow(QWidget):
         return bar
 
     def _refresh_bar(self) -> None:
-        any_rec = any(c.status.recording for c in self.ctls.values())
+        any_rec = any(c.recording_any() for c in self.ctls.values())
         self.rec_both.setText("■ STOP both" if any_rec else "● REC both")
         self.rec_both.setProperty("recording", "true" if any_rec else "false")
         self.rec_both.style().unpolish(self.rec_both)
@@ -305,7 +305,7 @@ class MainWindow(QWidget):
             self.swap()
 
     def toggle_record_both(self) -> None:
-        start = not any(c.status.recording for c in self.ctls.values())
+        start = not any(c.recording_any() for c in self.ctls.values())
         for ctl in self.ctls.values():
             ctl.set_recording(start)  # both sent concurrently
 
@@ -423,6 +423,7 @@ class MainWindow(QWidget):
         # Update in place: controllers keep a reference to this config object.
         self.cfg.cameras = new.cameras
         self.cfg.ble = new.ble
+        self.cfg.record = new.record
         try:
             config.save(self.cfg)
         except OSError as e:

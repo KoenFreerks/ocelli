@@ -63,12 +63,13 @@ class StatusBar(QFrame):
         lay.setSpacing(2)
         self.name = QLabel(ctl.name)
         self.rec = QLabel()
+        self.srec = QLabel()  # recording the HDMI feed to this PC
         self.tc = QLabel()
         self.settings = QLabel()
         self.media = QLabel()
         self.battery = QLabel()
         self.links = QLabel()
-        for w in (self.name, self.rec, self.tc, self.settings):
+        for w in (self.name, self.rec, self.srec, self.tc, self.settings):
             lay.addWidget(w)
         lay.addStretch(1)
         for w in (self.media, self.battery, self.links):
@@ -94,6 +95,17 @@ class StatusBar(QFrame):
             self.rec.setText(f"{_dot('#777')} STBY")
         else:
             self.rec.setText("")
+        if st.stream_rec:
+            _file, secs, size, dropped = self.ctl.capture.record_info()
+            h, rem = divmod(int(secs), 3600)
+            text = (f"{_dot('#ff2a2a')} <b>REC PC</b> {h}:{rem // 60:02d}:{rem % 60:02d} "
+                    f"{size / 2**20:,.0f} MB")
+            if dropped:
+                text += f" <span style='color:#f5b400'>({dropped} dropped)</span>"
+            self.srec.setText(text)
+            self.srec.setToolTip(st.stream_file)
+        else:
+            self.srec.setText("")
         self.tc.setText(st.timecode)
 
         parts = []
@@ -252,18 +264,22 @@ class ControlPanel(QFrame):
     def refresh(self) -> None:
         st, ctl = self.ctl.status, self.ctl
         live = ctl.connected()
-        for w in (self.rec, self.iso, self.shutter, self.kelvin, self.tint, self.auto_wb, self.sync):
+        target = ctl.cfg.record.target
+        self.rec.setEnabled(live if target == "camera" else ctl.capture is not None)
+        for w in (self.iso, self.shutter, self.kelvin, self.tint, self.auto_wb, self.sync):
             w.setEnabled(live)
         lens = live and bool(st.has_lens)
         for w in (self.aperture, self.af, self.auto_iris):
             w.setEnabled(lens)
             w.setToolTip("" if st.has_lens else "No electronic lens reported by the camera")
 
+        rec_on = ctl.recording_any()
         if st.rec_pending:
             self.rec.setText("waiting for camera…")
         else:
-            self.rec.setText("■ Stop recording" if st.recording else "● Record")
-        self.rec.setProperty("recording", "true" if st.recording else "false")
+            where = {"camera": "", "stream": " to PC", "both": " (camera + PC)"}[target]
+            self.rec.setText(f"■ Stop recording{where}" if rec_on else f"● Record{where}")
+        self.rec.setProperty("recording", "true" if rec_on else "false")
         self.rec.style().unpolish(self.rec)
         self.rec.style().polish(self.rec)
 

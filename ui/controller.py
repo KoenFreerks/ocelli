@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 import config
 from ble import protocol as p
@@ -36,6 +36,8 @@ class CameraStatus:
     model: str = ""
     recording: bool = False
     rec_pending: str = ""  # "start" / "stop" while waiting for the camera to confirm
+    stream_rec: bool = False  # recording the HDMI feed to a file on this PC
+    stream_file: str = ""
     transport: p.TransportInfo | None = None
     timecode: str = ""
     iso: int | None = None
@@ -68,6 +70,7 @@ class CameraController(QObject):
         self._stop = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._was_connected = False
+        self._rec_timer = QTimer(self, interval=1000, timeout=self.changed.emit)  # elapsed/size
         self._make_capture()
 
     @property
@@ -86,6 +89,8 @@ class CameraController(QObject):
             self.capture = BACKENDS[pv.backend](self.cam_cfg.video_device, pv.width, pv.height,
                                                 pv.fps, pv.pixel_format, parent=self)
             self.capture.stateChanged.connect(self._on_video_state)
+            self.capture.recordingChanged.connect(self._on_stream_recording)
+            self.capture.recordingProblem.connect(lambda t: self.alert.emit("warn", f"{self.name}: {t}"))
 
     def start(self) -> None:
         if self.capture:
@@ -147,6 +152,20 @@ class CameraController(QObject):
         return self.link  # type: ignore[return-value]
 
     def set_recording(self, on: bool) -> None:
+        """Start/stop recording where the Recording setting says: camera, stream or both."""
+        target = self.cfg.record.target
+        # A camera without a video feed or Bluetooth address (one-camera setups, or no
+        # Bluetooth at all) just sits that part out instead of raising an error.
+        if target in ("stream", "both") and self.capture and (on or self.status.stream_rec):
+            self._set_stream_recording(on)
+        if target in ("camera", "both") and self.cam_cfg.ble_address:
+            self._set_camera_recording(on)
+
+    def recording_any(self) -> bool:
+        cam = self.cfg.record.target in ("camera", "both") and self.status.recording
+        return cam or self.status.stream_rec
+
+    def _set_camera_recording(self, on: bool) -> None:
         async def go():
             link = self._need_link()
             self.status.rec_pending = "start" if on else "stop"
@@ -160,8 +179,35 @@ class CameraController(QObject):
                 self.changed.emit()
         self.run(go(), "start recording" if on else "stop recording")
 
+    def _set_stream_recording(self, on: bool) -> None:
+        cap = self.capture
+        try:
+            if cap is None or not cap.supports_recording:
+                raise RuntimeError("no video feed to record")
+            if on:
+                cap.start_recording(self.cfg.record, self.cid)
+            else:
+                cap.stop_recording()
+        except Exception as e:
+            log.warning("%s: stream recording: %s", self.name, e)
+            self.alert.emit("error", f"{self.name}: recording the stream failed: {e}")
+
+    def _on_stream_recording(self, active: bool, path: str) -> None:
+        st = self.status
+        was = st.stream_rec
+        st.stream_rec, st.stream_file = active, path if active else st.stream_file
+        if active:
+            self._rec_timer.start()
+            name = path.rsplit("/", 1)[-1]
+            self.alert.emit("info", f"{self.name}: recording to {name}")
+        else:
+            self._rec_timer.stop()
+            if was and path:
+                self.alert.emit("info", f"{self.name}: saved {path.rsplit('/', 1)[-1]}")
+        self.changed.emit()
+
     def toggle_recording(self) -> None:
-        self.set_recording(not self.status.recording)
+        self.set_recording(not self.recording_any())
 
     def send(self, cmd: p.Command, what: str) -> None:
         async def go():

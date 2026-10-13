@@ -1,9 +1,15 @@
 # Ocelli
 
-Linux monitor and remote for two Blackmagic Pocket Cinema Camera 4K:
-HDMI preview via Elgato Cam Link 4K, control and status over Bluetooth LE.
+Linux monitor and remote for Blackmagic Pocket Cinema Camera 4K:
+HDMI preview via Elgato Cam Link 4K, control and status over Bluetooth LE, and optional
+recording of the HDMI feed straight to disk.
 
-Status: all milestones done (BLE, video, full GUI, time sync). The GUI comes in later milestones.
+Built for **two cameras** (A and B), and tested with two. One camera works too: leave B
+unassigned. Bluetooth is optional: with no camera paired you still get the preview and
+stream recording. More than two cameras is not supported (and 1080p60 from three Cam Links on
+one PC would need separate USB controllers for each).
+
+Status: all milestones done (BLE, video, full GUI, time sync, stream recording).
 
 ## Setup (Ubuntu 24.04)
 
@@ -81,8 +87,32 @@ Lens controls are greyed out when the camera reports no electronic lens.
 
 **Preview quality.** The preview is the camera's HDMI output (1080p, YUYV 4:2:2), scaled with
 smoothing to fit. For judging focus (e.g. with the camera's focus assist on), use **Z**: it shows
-camera pixels 1:1 without any filtering, so single-pixel focus-assist dots stay exact. Recordings
-are unaffected by any of this; the camera records internally.
+camera pixels 1:1 without any filtering, so single-pixel focus-assist dots stay exact. None of
+this affects recordings (see below).
+
+## Recording
+
+Settings → **Recording → REC records** picks what the REC buttons (and Ctrl+R) do:
+
+- **The camera's own media** (default): sends the record command over Bluetooth. The footage is
+  the camera's full-quality file on its card or SSD.
+- **The video stream, saved on this PC**: encodes the HDMI feed to a file; no Bluetooth needed.
+  It is the 8-bit HDMI picture (1080p60 here) without audio, **including whatever the camera
+  draws on HDMI** such as focus peaking, so turn those off on the camera or use *Clean feed*.
+- **Both**.
+
+Stream recordings go to the chosen folder (default `~/Videos/Ocelli`) as
+`Ocelli_<camera>_<date>_<time>.mkv`. Codec H.264 or H.265, bitrate, and MKV or fragmented MP4
+are in the same settings group; both survive a crash of the PC or the app (MKV is the safest).
+It uses NVIDIA NVENC when GStreamer's `nvcodec` plugin is available (low CPU: two cameras
+recording at once cost about 60% of one core on the test PC), otherwise x264/x265 on the CPU
+(about 170% of one core per camera at 1080p60). The preview is not affected either way. If a
+Cam Link drops out and returns, recording continues in a new `_part2` file. Recording stops
+by itself when less than 1 GB of disk is left. The status bar shows `REC PC`, elapsed time and
+file size.
+
+If NVENC is missing although the NVIDIA driver is installed, GStreamer's plugin cache may be
+stale: `rm ~/.cache/gstreamer-1.0/registry.x86_64.bin` and start Ocelli again.
 
 The log is written to `logs/ocelli.log`, including every Bluetooth and video state change.
 

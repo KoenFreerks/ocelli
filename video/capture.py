@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import collections
 import logging
+import os
+import shutil
 import time
 from dataclasses import dataclass
 
@@ -23,6 +25,8 @@ from PySide6.QtMultimedia import (
     QVideoFrameFormat,
     QVideoSink,
 )
+
+import config
 
 from . import devices
 
@@ -37,6 +41,7 @@ FORMATS = {
 
 NO_SIGNAL_AFTER = 2.0  # seconds without a frame
 RETRY_EVERY = 2.0
+MIN_FREE_BYTES = 1 << 30  # stop a stream recording before the disk is completely full
 
 
 @dataclass
@@ -53,6 +58,10 @@ class Capture(QObject):
     frame = Signal(object)  # QVideoFrame
     # "starting", "streaming", "no-signal", "missing", "error", "stopped"
     stateChanged = Signal(str, str)
+    # Stream recording: (active, file path) on start/stop/new part; text on problems.
+    recordingChanged = Signal(bool, str)
+    recordingProblem = Signal(str)
+    supports_recording = False
 
     def __init__(self, by_id: str, width: int = 1920, height: int = 1080, fps: int = 60,
                  pixel_format: str = "YUYV", parent: QObject | None = None) -> None:
@@ -92,6 +101,21 @@ class Capture(QObject):
     def latency_samples(self) -> list[float]:
         return list(self._latencies)
 
+    # Stream recording: only GstCapture implements it.
+    @property
+    def recording(self) -> bool:
+        return False
+
+    def start_recording(self, rc: config.RecordConfig, camera_id: str) -> None:
+        raise RuntimeError("stream recording needs the GStreamer backend")
+
+    def stop_recording(self) -> None:
+        pass
+
+    def record_info(self) -> tuple[str, float, int, int]:
+        """(file, seconds, bytes, dropped frames) of the current recording."""
+        return "", 0.0, 0, 0
+
     # --- for subclasses ---
 
     def _open(self) -> None:
@@ -101,8 +125,8 @@ class Capture(QObject):
         raise NotImplementedError
 
     def _frame_arrived(self, frame: QVideoFrame, latency_ms: float | None = None) -> None:
-        if not self._want_running:
-            return  # a queued frame that arrived after stop()
+        if not self._want_running or self.state in ("error", "missing", "stopped"):
+            return  # a queued frame from a pipeline that is already closed
         now = time.monotonic()
         self._times.append(now)
         self._last_frame = now
@@ -170,6 +194,13 @@ class GstCapture(Capture):
         self._Gst, self._GstVideo = Gst, GstVideo
         self._pipeline = None
         self._bus_timer = QTimer(self, interval=100, timeout=self._poll_bus)
+        from .recorder import StreamRecorder
+
+        self._recorder = StreamRecorder()
+        self._record_cfg: config.RecordConfig | None = None
+        self._record_base = ""
+        self._record_part = 1
+        self._disk_checked = 0.0
 
     def _open(self) -> None:
         Gst = self._Gst
@@ -177,7 +208,7 @@ class GstCapture(Capture):
         desc = (
             f'v4l2src device="{self.by_id}" ! '
             f"video/x-raw,format={gst_fmt},width={self.width},height={self.height},"
-            f"framerate={self.fps}/1 ! "
+            f"framerate={self.fps}/1 ! tee name=t ! "
             "appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
         )
         self._pipeline = Gst.parse_launch(desc)
@@ -186,12 +217,86 @@ class GstCapture(Capture):
         if self._pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("pipeline failed to start (device busy or unsupported format?)")
         self._bus_timer.start()
+        if self._record_cfg is not None:  # recording was on when the device dropped out
+            self._record_part += 1
+            self._begin_part()
 
     def _close(self) -> None:
         self._bus_timer.stop()
         if self._pipeline is not None:
+            if self._recorder.active:
+                path = self._recorder.path
+                self._recorder.stop()
+                self.recordingChanged.emit(False, path)
             self._pipeline.set_state(self._Gst.State.NULL)
             self._pipeline = None
+
+    # --- stream recording ---
+
+    supports_recording = True
+
+    @property
+    def recording(self) -> bool:
+        return self._record_cfg is not None
+
+    def start_recording(self, rc: config.RecordConfig, camera_id: str) -> None:
+        if self.recording:
+            return
+        if self._pipeline is None:
+            raise RuntimeError("video is not running")
+        os.makedirs(rc.folder, exist_ok=True)
+        free = shutil.disk_usage(rc.folder).free
+        if free < MIN_FREE_BYTES:
+            raise RuntimeError(f"only {free // 2**20} MB free in {rc.folder}")
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        self._record_base = os.path.join(rc.folder, f"Ocelli_{camera_id}_{stamp}")
+        self._record_part = 1
+        self._record_cfg = rc
+        try:
+            self._begin_part()
+        except Exception:
+            self._record_cfg = None
+            raise
+
+    def _begin_part(self) -> None:
+        rc = self._record_cfg
+        suffix = "" if self._record_part == 1 else f"_part{self._record_part}"
+        path = f"{self._record_base}{suffix}.{rc.container}"
+        try:
+            self._recorder.start(self._pipeline, path, rc)
+        except Exception as e:
+            self._record_cfg = None
+            self.recordingProblem.emit(f"recording could not start: {e}")
+            self.recordingChanged.emit(False, "")
+            return
+        self.recordingChanged.emit(True, path)
+
+    def stop_recording(self) -> None:
+        if not self.recording:
+            return
+        self._record_cfg = None
+        if self._recorder.active:
+            path = self._recorder.path
+            if not self._recorder.stop():
+                self.recordingProblem.emit(f"{os.path.basename(path)} may be incomplete")
+            self.recordingChanged.emit(False, path)
+
+    def stop(self) -> None:
+        self._record_cfg = None  # an explicit stop ends the recording; a dropout does not
+        super().stop()
+
+    def record_info(self) -> tuple[str, float, int, int]:
+        r = self._recorder
+        return r.path, r.elapsed(), r.size(), r.dropped
+
+    def _check(self) -> None:
+        super()._check()
+        if self._recorder.active and time.monotonic() - self._disk_checked > 10:
+            self._disk_checked = time.monotonic()
+            free = shutil.disk_usage(os.path.dirname(self._recorder.path)).free
+            if free < MIN_FREE_BYTES:
+                self.recordingProblem.emit("disk almost full: recording stopped")
+                self.stop_recording()
 
     def _on_sample(self, sink) -> int:
         # GStreamer streaming thread
