@@ -1,13 +1,14 @@
 # Ocelli
 
-Linux monitor and remote for Blackmagic Pocket Cinema Camera 4K:
-HDMI preview via Elgato Cam Link 4K, control and status over Bluetooth LE, and optional
-recording of the HDMI feed straight to disk.
+Linux monitor and remote for one or two Blackmagic Pocket Cinema Camera 4K: HDMI preview via
+Elgato Cam Link 4K, control and status over Bluetooth LE, and optional recording of the HDMI
+feed straight to disk.
 
-Built for **two cameras** (A and B), and tested with two. One camera works too: leave B
-unassigned. Bluetooth is optional: with no camera paired you still get the preview and
-stream recording. More than two cameras is not supported (and 1080p60 from three Cam Links on
-one PC would need separate USB controllers for each).
+Ocelli was developed for academic use, to watch and run cameras during behavioural
+experiments. It is designed for **up to two cameras** (A and B) and tested with two; with one
+camera, leave B unassigned. Bluetooth is optional: without a paired camera you still get the
+preview and stream recording. Clock sync is good to about 100 ms and the cameras are not
+frame-locked, so it is not suited to analyses that need frame-accurate sync between cameras.
 
 Status: all milestones done (BLE, video, full GUI, time sync, stream recording).
 
