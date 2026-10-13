@@ -12,6 +12,8 @@ frame-locked, so it is not suited to analyses that need frame-accurate sync betw
 
 Status: all milestones done (BLE, video, full GUI, time sync, stream recording).
 
+![Two cameras side by side, with live status for each](docs/images/side-by-side.jpg)
+
 ## Setup (Ubuntu 24.04)
 
 System packages:
@@ -66,6 +68,14 @@ the shared dongle) and starts both video feeds. If a link drops or a Cam Link is
 keeps retrying and shows an alert banner. By default each camera's clock is set to this PC's time
 whenever it connects (Settings → Options).
 
+Layouts: side by side (above), or one camera large with the other as a thumbnail (Tab swaps):
+
+![Main camera with a thumbnail of the second](docs/images/main-thumbnail.jpg)
+
+Press **C** for the control panels (record, ISO, shutter, white balance, lens, time sync):
+
+![Per-camera control panels](docs/images/control-panels.jpg)
+
 | Key | Action |
 |---|---|
 | 1 / 2 / 3 | main + thumbnail / side by side / single feed |
@@ -101,6 +111,8 @@ Settings → **Recording → REC records** picks what the REC buttons (and Ctrl+
   It is the 8-bit HDMI picture (1080p60 here) without audio, **including whatever the camera
   draws on HDMI** such as focus peaking, so turn those off on the camera or use *Clean feed*.
 - **Both**.
+
+![Recording settings](docs/images/settings-recording.png)
 
 Stream recordings go to the chosen folder (default `~/Videos/Ocelli`) as
 `Ocelli_<camera>_<date>_<time>.mkv`. Codec H.264 or H.265, bitrate, and MKV or fragmented MP4
