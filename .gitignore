@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 logs/
+
+# Claude Code notes about the local environment
+CLAUDE.md
+claude.md
+CLAUDE.local.md
+.claude/
